@@ -1,64 +1,45 @@
 <!DOCTYPE html>
-<html lang="id">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Game Matematika + Chat</title>
+  <title>Game Matematika Multiplayer</title>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database.js"></script>
   <style>
-    body {
-      background-color: #f0f8ff;
-      font-family: Arial, sans-serif;
-      text-align: center;
-      padding: 20px;
-    }
-    input, button {
-      padding: 10px;
-      margin: 10px;
-      font-size: 16px;
-    }
-    #question {
-      font-size: 20px;
-      margin: 20px;
-    }
-    #chatBox {
-      width: 100%;
-      max-width: 400px;
-      margin: 30px auto;
-      background: #fff;
-      border: 1px solid #ccc;
-      padding: 10px;
-      text-align: left;
-      max-height: 200px;
-      overflow-y: auto;
-    }
-    #footer {
-      margin-top: 30px;
-      font-size: 13px;
-      color: #777;
-    }
+    body { font-family: Arial; text-align: center; }
+    #chat { max-height: 150px; overflow-y: auto; border: 1px solid #ccc; padding: 5px; margin-top: 10px; }
+    .hidden { display: none; }
   </style>
 </head>
 <body>
   <h1>Game Matematika</h1>
-  <input id="name" placeholder="Nama kamu" /><br>
-  <div id="question"></div>
-  <input id="answer" type="number" placeholder="Jawaban" />
-  <button id="submitBtn">Kirim</button>
 
-  <h2>Chat</h2>
-  <div id="chatBox"></div>
-  <input id="chatInput" placeholder="Ketik pesan..." />
-  <button id="sendChat">Kirim Pesan</button>
+  <div id="lobby">
+    <p>Masukkan Nama: <input type="text" id="playerName"></p>
+    <p>Kode Room: <input type="text" id="roomCode"></p>
+    <button onclick="buatRoom()">Buat Room</button>
+    <button onclick="joinRoom()">Gabung Room</button>
+  </div>
 
-  <div id="footer">© AldricAS • Do not distribute</div>
+  <div id="gameArea" class="hidden">
+    <h2 id="roomInfo"></h2>
+    <div id="players"></div>
+    <div id="startGameArea" class="hidden">
+      <button onclick="mulaiGame()">Mulai Game</button>
+    </div>
+    <div id="countdown"></div>
+    <div id="quiz"></div>
+    <div id="chat"></div>
+    <input id="chatInput" placeholder="Ketik pesan...">
+    <button onclick="sendMessage()">Kirim</button>
+    <br><br>
+    <button id="micBtn" onclick="toggleMic()">Nyalakan Mic</button>
+    <audio id="audioStream" autoplay></audio>
+  </div>
 
-  <script type="module">
-    // Import Firebase SDK
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
-    import { getDatabase, ref, push, onChildAdded } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+  <script>
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js";
+    import { getDatabase, ref, set, push, onValue, onChildAdded, onDisconnect } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-database.js";
 
-    // Firebase config
     const firebaseConfig = {
       apiKey: "AIzaSyB-q_Ab78uPp_c-sPvlOKvaKzYi3DH7RAw",
       authDomain: "matematika-game-b3811.firebaseapp.com",
@@ -70,64 +51,107 @@
       measurementId: "G-P1T5E6P9YR"
     };
 
-    // Inisialisasi Firebase
     const app = initializeApp(firebaseConfig);
-    const analytics = getAnalytics(app);
     const db = getDatabase(app);
 
-    // Game Matematika
-    function generateQuestion() {
-      const a = Math.floor(Math.random() * 10) + 1;
-      const b = Math.floor(Math.random() * 10) + 1;
-      document.getElementById("question").textContent = `Berapakah ${a} + ${b}?`;
-      return a + b;
+    let roomCode = "";
+    let playerName = "";
+    let isHost = false;
+    let micStream = null;
+
+    function buatRoom() {
+      playerName = document.getElementById('playerName').value;
+      roomCode = Math.random().toString(36).substring(2, 7);
+      isHost = true;
+      const roomRef = ref(db, 'rooms/' + roomCode);
+      set(roomRef, {
+        players: {},
+        started: false,
+        chat: []
+      });
+      joinRoom(true);
     }
 
-    let correctAnswer = generateQuestion();
+    function joinRoom(fromCreate = false) {
+      playerName = document.getElementById('playerName').value;
+      if (!fromCreate) roomCode = document.getElementById('roomCode').value;
+      document.getElementById('lobby').classList.add('hidden');
+      document.getElementById('gameArea').classList.remove('hidden');
+      document.getElementById('roomInfo').innerText = `Room: ${roomCode}`;
 
-    document.getElementById("submitBtn").onclick = () => {
-      const answer = parseInt(document.getElementById("answer").value);
-      const name = document.getElementById("name").value || "Anonim";
-      if (answer === correctAnswer) {
-        alert("Benar!");
-        push(ref(db, "scores"), {
-          name: name,
-          score: 1,
-          timestamp: Date.now()
-        });
-      } else {
-        alert("Salah, coba lagi!");
+      set(ref(db, `rooms/${roomCode}/players/${playerName}`), { score: 0 });
+      onDisconnect(ref(db, `rooms/${roomCode}/players/${playerName}`)).remove();
+
+      if (isHost) {
+        document.getElementById('startGameArea').classList.remove('hidden');
       }
-      correctAnswer = generateQuestion();
-      document.getElementById("answer").value = "";
-    };
 
-    // Chat
-    const chatBox = document.getElementById("chatBox");
-    const chatInput = document.getElementById("chatInput");
-
-    document.getElementById("sendChat").onclick = () => {
-      const name = document.getElementById("name").value || "Anonim";
-      const message = chatInput.value;
-      if (message.trim() === "") return;
-
-      push(ref(db, "chats"), {
-        name: name,
-        message: message,
-        timestamp: Date.now()
+      onValue(ref(db, `rooms/${roomCode}/players`), (snapshot) => {
+        const playersDiv = document.getElementById('players');
+        playersDiv.innerHTML = '<h3>Pemain:</h3>';
+        const data = snapshot.val();
+        for (const p in data) {
+          playersDiv.innerHTML += `<p>${p} - Skor: ${data[p].score}</p>`;
+        }
       });
-      chatInput.value = "";
-    };
 
-    // Tampilkan pesan chat secara realtime
-    const chatRef = ref(db, "chats");
-    onChildAdded(chatRef, (data) => {
-      const chat = data.val();
-      const p = document.createElement("p");
-      p.textContent = `${chat.name}: ${chat.message}`;
-      chatBox.appendChild(p);
-      chatBox.scrollTop = chatBox.scrollHeight;
-    });
+      onValue(ref(db, `rooms/${roomCode}/started`), (snap) => {
+        if (snap.val() === true) startCountdown();
+      });
+
+      onChildAdded(ref(db, `rooms/${roomCode}/chat`), (snapshot) => {
+        const msg = snapshot.val();
+        const chatBox = document.getElementById('chat');
+        const msgEl = document.createElement('div');
+        msgEl.textContent = `${msg.name}: ${msg.text}`;
+        chatBox.appendChild(msgEl);
+      });
+    }
+
+    function mulaiGame() {
+      const startTime = Date.now() + 5000;
+      set(ref(db, `rooms/${roomCode}/startTime`), startTime);
+      set(ref(db, `rooms/${roomCode}/started`), true);
+    }
+
+    function startCountdown() {
+      const countdownDiv = document.getElementById('countdown');
+      let count = 5;
+      const interval = setInterval(() => {
+        countdownDiv.innerText = `Mulai dalam ${count} detik...`;
+        count--;
+        if (count < 0) {
+          clearInterval(interval);
+          countdownDiv.innerText = '';
+          // Panggil startGame() di sini nanti
+        }
+      }, 1000);
+    }
+
+    function sendMessage() {
+      const text = document.getElementById('chatInput').value;
+      const messageRef = push(ref(db, `rooms/${roomCode}/chat`));
+      set(messageRef, { name: playerName, text });
+      document.getElementById('chatInput').value = '';
+    }
+
+    async function toggleMic() {
+      const micBtn = document.getElementById('micBtn');
+      const audioEl = document.getElementById('audioStream');
+      if (!micStream) {
+        try {
+          micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          audioEl.srcObject = micStream;
+          micBtn.textContent = 'Matikan Mic';
+        } catch (e) {
+          alert('Mic tidak diizinkan!');
+        }
+      } else {
+        micStream.getTracks().forEach(track => track.stop());
+        micStream = null;
+        micBtn.textContent = 'Nyalakan Mic';
+      }
+    }
   </script>
 </body>
 </html>
